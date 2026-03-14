@@ -1,0 +1,11 @@
+{
+  "name": "com.yourname.multiplayer-scene-editor",
+  "version": "0.1.0",
+  "displayName": "Multiplayer Scene Editor",
+  "description": "Real-time collaborative scene editing for Unity.",
+  "unity": "2021.3",
+  "type": "tool",
+  "author": {
+    "name": "Your Name"
+  }
+}
