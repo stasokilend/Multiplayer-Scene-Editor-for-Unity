@@ -1,0 +1,5 @@
+{
+  "name": "MultiplayerSceneEditor.Editor",
+  "includePlatforms": ["Editor"],
+  "references": ["MultiplayerSceneEditor.Runtime"]
+}
