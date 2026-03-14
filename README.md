@@ -12,246 +12,178 @@
 Multiplayer Scene Editor
 ```
 
-**Real-time collaborative scene editing for Unity — like Google Docs, but for your hierarchy.**
+# 🎮 Multiplayer Scene Editor
 
-<br/>
+> A Unity Editor plugin for **real-time collaborative scene editing** — like Google Docs, but inside the Unity Editor.
 
-![Unity](https://img.shields.io/badge/Unity-2021.3%2B-black?style=flat-square&logo=unity)
-![C#](https://img.shields.io/badge/C%23-.NET%20Standard%202.1-239120?style=flat-square&logo=csharp)
-![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Alpha-orange?style=flat-square)
-
-<br/>
-
-> [!WARNING]
-> **LAN only.** MSE communicates over a direct TCP connection — there is no relay server or cloud backend.  
-> All participants must be on the **same local network**.  
-> For remote teams, use a VPN such as [Tailscale](https://tailscale.com) or [ZeroTier](https://zerotier.com) to bridge networks before connecting.
-
-<br/>
-
-</div>
+![Unity](https://img.shields.io/badge/Unity-2021.3%2B-black?logo=unity)
+![Language](https://img.shields.io/badge/Language-C%23-239120?logo=csharp)
+![Status](https://img.shields.io/badge/Status-Early%20Development-orange)
+![Network](https://img.shields.io/badge/Network-LAN%20Only-blue)
 
 ---
 
-## What is this?
+## ⚠️ Important Warnings
 
-**Multiplayer Scene Editor (MSE)** is a Unity Editor package that lets multiple developers work in the same scene simultaneously — seeing each other's transforms, selections, cursor positions, and hierarchy changes in real time over a local TCP connection.
+> **Please read carefully before using the plugin.**
 
-No cloud. No subscription. Just connect and collaborate.
+---
 
-<br/>
+### 🌐 Local Network Only
 
-## Features
+This plugin currently works **only over a local network (LAN)**.  
+Remote collaboration over the internet is **not supported** yet.  
+All participants must be on the **same Wi-Fi or wired network**.
 
-| | |
+---
+
+### 🔗 Unity Version Control Required
+
+You **must** connect all collaborators to the **project owner's Unity Version Control** repository **before** starting a session.
+
+> Working without version control puts your project at serious risk of data loss or merge conflicts.
+
+---
+
+### 🚧 Early Development — Use With Caution
+
+This plugin is in its **early stages of development**.
+
+**Known risks:**
+- 🐛 Bugs and unexpected behaviour are likely
+- 💥 Project files or scene structure may become corrupted
+- 🔧 GameObjects may lose their scripts or have components reset
+- 📋 Extensive testing is still required
+
+> ❌ **Not recommended for serious or production projects.**  
+> Use only in test projects or with a full version control backup.
+
+---
+
+## ✨ Features
+
+| Feature | Description |
 |---|---|
-| 🔴 **Live presence** | See every collaborator's cursor moving in 3D space |
-| 🔒 **Object locking** | Select an object to claim it — others can't edit it while you do |
-| 🌳 **Hierarchy sync** | Create, delete, rename, reparent — changes propagate instantly |
-| 📐 **Transform sync** | Position, rotation, scale streamed in real time |
-| ✅ **Join approval** | Host explicitly approves or denies incoming connections |
-| 💬 **In-editor chat** | Text chat in the MSE panel, no external tools needed |
-| 🎨 **Color-coded users** | Each participant gets a unique hue for visual disambiguation |
-| 🏓 **Heartbeat / kick** | Dead connections detected and cleaned up automatically |
-
-<br/>
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Unity Editor                        │
-│                                                         │
-│   ┌──────────────┐        ┌──────────────────────────┐  │
-│   │  MSE Window  │◄──────►│    SceneSyncManager      │  │
-│   │  (UI / Chat) │        │  (central coordinator)   │  │
-│   └──────────────┘        └────────┬─────────────────┘  │
-│                                    │                     │
-│   ┌──────────────┐        ┌────────▼─────────────────┐  │
-│   │HierarchyOver-│        │   ObjectTracker          │  │
-│   │lay / SceneV. │        │   LockManager            │  │
-│   └──────────────┘        └────────┬─────────────────┘  │
-│                                    │                     │
-│                    ┌───────────────▼────────────────┐    │
-│                    │     NetworkServer / Client      │    │
-│                    │   TCP  ·  length-prefixed JSON  │    │
-│                    └────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
-```
-
-<br/>
-
-## Prerequisites — Sync the project first
-
-> [!IMPORTANT]
-> MSE synchronises **editor actions** (transforms, selections, hierarchy changes), not project files.  
-> All participants must be working in **the exact same project with the same scene** before starting a session.  
-> The recommended way to achieve this is **Unity Version Control (formerly Plastic SCM)**.
-
-<br/>
-
-### Setting up Unity Version Control
-
-**Owner (once per project):**
-
-1. Open the project in Unity.
-2. Go to **Edit → Project Settings → Version Control** and set Mode to **Unity Version Control**.
-3. In the top menu open **Window → Unity Version Control** — the UVC panel will appear.
-4. Click **Create new repository**, name it and click **Create**.
-5. In the UVC panel click **Add all files** → then **Checkin** (= first commit).  
-   Add a comment like `Initial checkin` and confirm.
-6. Go to the UVC panel top-right menu → **Invite members** → add collaborators by their **Unity ID email**.
-
-<br/>
-
-**Collaborator (before first session):**
-
-1. Make sure you have Unity Hub and the **same Unity version** installed.
-2. Open **Unity Hub → Version Control** tab (sidebar).  
-   If you don't see it — install **Unity Version Control** from [unity.com/solutions/version-control](https://unity.com/solutions/version-control).
-3. Sign in with your Unity ID (must match the invitation email).
-4. Find the shared repository in the list → click **Get** → choose a local folder.
-5. Unity Hub will download the project and open it automatically.
-6. Open the same scene the host is working on (double-click it in the Project window).
-
-<br/>
-
-**Daily workflow:**
-
-```
-Before session:
-  UVC panel → [ Update workspace ] — pull latest changes
-
-After session:
-  Host saves the scene (Ctrl+S)
-  Host: UVC panel → Pending Changes → [ Checkin ] — push to repo
-  Others: UVC panel → [ Update workspace ] — pull the saved result
-```
-
-> [!NOTE]
-> Only the **host** should save and checkin the scene after a collaborative session.  
-> If multiple people checkin simultaneously, you will get merge conflicts in the `.unity` file.
-
-<br/>
+| 🖥️ Host / Join Session | One user hosts, others connect via TCP over LAN |
+| 🔐 Join Approval | Host manually approves or denies each connection request |
+| 🔄 Transform Sync | Real-time sync of position, rotation, and scale |
+| 🔒 Object Locking | Selecting an object locks it — others cannot edit it simultaneously |
+| 🌳 Hierarchy Sync | Create, delete, rename, and reparent objects in real time |
+| 🖱️ 3D Cursors | See where each collaborator's mouse is in the Scene View |
+| 💬 Chat | Built-in text chat inside the editor |
+| 🎨 User Colors | Each participant gets a unique color for easy identification |
+| 🏷️ Hierarchy Overlay | Selected objects are highlighted in the Hierarchy window |
 
 ---
 
-## Quick Start
+## 📦 Installation
 
-### Installation
+1. Clone or download this repository
+2. Copy the `MultiplayerSceneEditor` folder into your Unity project's `Assets/` directory
+3. Wait for Unity to compile the scripts
+4. Open the plugin via **Window → Multiplayer Scene Editor**
 
-1. Copy the `MultiplayerSceneEditor/` folder into your project's `Assets/` or `Packages/` directory.
-2. Unity will compile the package automatically.
-3. Open **Window → Multiplayer Scene Editor**.
+---
 
-### Host a session
+## 🚀 Quick Start
 
-```
-Window → Multiplayer Scene Editor → Session tab
-  [Your Name]  →  [Port: 7700]  →  [ Host ]
-```
+### Hosting a Session
 
-Share your **local IP** with teammates (shown in the panel).
+1. Open **Window → Multiplayer Scene Editor**
+2. Enter your display name and choose a port (default: `7700`)
+3. Click **Host**
+4. Share your **local IP address** with collaborators
+5. Approve incoming connection requests in the **Users** tab
 
-### Join a session
+### Joining a Session
 
-```
-Window → Multiplayer Scene Editor → Session tab
-  [Your Name]  →  [Host IP : Port]  →  [ Join ]
-```
+1. Open **Window → Multiplayer Scene Editor**
+2. Enter your display name and the host's local IP address
+3. Click **Join** and wait for the host to approve your request
 
-The host will see a join request and must **Approve** it before you enter.
+---
 
-<br/>
-
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 MultiplayerSceneEditor/
 ├── Editor/
 │   ├── Core/
-│   │   ├── Protocol.cs          # Wire format, message types, serialisation helpers
-│   │   ├── NetworkServer.cs     # TCP listener + per-peer connection (host side)
-│   │   ├── NetworkClient.cs     # TCP client with reconnect logic (guest side)
-│   │   ├── SceneSyncManager.cs  # Central coordinator, Unity event loop
-│   │   ├── ObjectTracker.cs     # Detects scene changes, fires sync events
-│   │   └── LockManager.cs       # GUID → userId ownership table
+│   │   ├── Protocol.cs          # Network protocol, message types, serialization
+│   │   ├── NetworkServer.cs     # TCP server (host side)
+│   │   ├── NetworkClient.cs     # TCP client (joining side)
+│   │   ├── SceneSyncManager.cs  # Central session coordinator
+│   │   ├── LockManager.cs       # Per-object edit locking
+│   │   └── ObjectTracker.cs     # Detects and broadcasts scene changes
 │   └── UI/
-│       ├── MultiplayerEditorWindow.cs  # Dockable panel (Session / Users / Chat)
-│       ├── HierarchyOverlay.cs         # Colour badges in the Hierarchy window
-│       └── SceneViewOverlay.cs         # Cursor labels in the Scene View
+│       ├── MultiplayerEditorWindow.cs  # Main dockable editor window
+│       ├── HierarchyOverlay.cs         # Hierarchy window color tinting
+│       └── SceneViewOverlay.cs         # Scene View cursors and indicators
 └── Runtime/
-    └── StableGuid.cs            # Hidden MonoBehaviour — stable GUID per GameObject
+    └── StableGuid.cs            # Persistent GUID component for GameObjects
 ```
 
-<br/>
+---
 
-## Protocol
+## 🔧 How It Works
 
-All messages are framed as:
+The plugin uses a **TCP client-server architecture** with a binary framing protocol (4-byte length prefix + JSON payload).
 
 ```
-┌──────────────┬──────────────────────────────────┐
-│  4 bytes     │  N bytes                         │
-│  Big-endian  │  UTF-8 JSON  (Envelope)          │
-│  length      │                                  │
-└──────────────┴──────────────────────────────────┘
+Client A (Host)          Client B                Client C
+     │                      │                       │
+     │◄──── Handshake ───────┤                       │
+     │──── JoinPending ─────►│                       │
+     │                      │  [Host approves]       │
+     │──── HandshakeAck ────►│                       │
+     │◄──── Handshake ───────────────────────────────┤
+     │──────────────────────────── HandshakeAck ────►│
+     │                      │                       │
+     │◄──── TransformUpdate ─┤──────────────────────►│
+     │◄──── LockRequest ─────┤                       │
+     │──── LockGrant ───────►│                       │
 ```
 
-**Envelope**
-```json
-{
-  "type":      5,
-  "userId":    "a3f9...",
-  "payload":   "{ ... }",
-  "timestamp": 1710000000000
-}
-```
+Each GameObject is assigned a **StableGuid** component (hidden from the Inspector) so objects can be reliably identified and synced across all editors.
 
-**Message types**
+---
 
-| # | Name | Direction | Purpose |
-|---|------|-----------|---------|
-| 1 | `Handshake` | Client → Server | Join request |
-| 2 | `HandshakeAck` | Server → Client | Welcome + scene snapshot |
-| 3 | `UserJoined` | Server → All | New participant |
-| 4 | `UserLeft` | Server → All | Participant disconnected |
-| 5 | `TransformUpdate` | Any → All | Position / rotation / scale |
-| 6 | `HierarchyChange` | Any → All | Create / delete / rename / reparent |
-| 7 | `SelectionUpdate` | Any → All | What a user has selected |
-| 8–11 | `Lock*` | Any ↔ Server | Exclusive edit requests |
-| 12 | `CursorUpdate` | Any → All | 3D mouse position |
-| 13 | `ComponentUpdate` | Any → All | Non-transform property change |
-| 14 | `ChatMessage` | Any → All | Text chat |
-| 17 | `JoinDenied` | Server → Client | Host rejected |
-| 18 | `JoinPending` | Server → Client | Waiting for approval |
+## 📡 Network Protocol
 
-<br/>
+The plugin communicates using 18 message types:
 
-## Requirements
+| Message | Direction | Purpose |
+|---|---|---|
+| `Handshake` | Client → Server | Join request |
+| `HandshakeAck` | Server → Client | Welcome + full scene snapshot |
+| `JoinPending` | Server → Client | Waiting for host approval |
+| `JoinDenied` | Server → Client | Host rejected the request |
+| `TransformUpdate` | Any → All | Object moved/rotated/scaled |
+| `HierarchyChange` | Any → All | Object created/deleted/renamed/reparented |
+| `SelectionUpdate` | Any → All | User changed their selection |
+| `LockRequest/Grant/Deny/Release` | Both | Object lock management |
+| `CursorUpdate` | Any → All | 3D mouse position in Scene View |
+| `ComponentUpdate` | Any → All | Non-transform property changed |
+| `ChatMessage` | Any → All | Text chat |
+| `Ping / Pong` | Any → Any | Connection health check |
 
-- **Unity 2021.3 LTS** or newer
-- All participants on the **same local network** (LAN / VPN)
-- No additional dependencies — uses only Unity's built-in APIs and .NET sockets
+---
 
-<br/>
+## ⚙️ Requirements
 
-## Known Limitations
+- Unity **2021.3 LTS** or newer
+- All collaborators on the **same local network**
+- Project connected to **Unity Version Control** before starting
 
-- **No undo sync** — Ctrl+Z is local only; use with care in shared sessions
-- **No Prefab sync** — Prefab mode is not yet broadcast
-- **Scene save is independent** — each user saves their own copy
-- **LAN only** — no relay server; use a VPN (e.g. Tailscale) for remote teams
+---
 
-<br/>
+## 🤝 Contributing
 
-## Contributing
+Contributions, bug reports, and feedback are welcome!  
+This project is in active early development — please open an issue before submitting large pull requests.
 
-Issues and pull requests are welcome. Please open an issue first to discuss significant changes.
+---
 
-<br/>
+## 📄 License
 
-## License
-
-MIT © 2024
+MIT License — see [LICENSE](LICENSE) for details.
