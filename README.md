@@ -82,6 +82,61 @@ No cloud. No subscription. Just connect and collaborate.
 
 <br/>
 
+## Prerequisites — Sync the project first
+
+> [!IMPORTANT]
+> MSE synchronises **editor actions** (transforms, selections, hierarchy changes), not project files.  
+> All participants must be working in **the exact same project with the same scene** before starting a session.  
+> The recommended way to achieve this is **Unity Version Control (formerly Plastic SCM)**.
+
+<br/>
+
+### Setting up Unity Version Control
+
+**Owner (once per project):**
+
+1. Open the project in Unity.
+2. Go to **Edit → Project Settings → Version Control** and set Mode to **Unity Version Control**.
+3. In the top menu open **Window → Unity Version Control** — the UVC panel will appear.
+4. Click **Create new repository**, name it and click **Create**.
+5. In the UVC panel click **Add all files** → then **Checkin** (= first commit).  
+   Add a comment like `Initial checkin` and confirm.
+6. Go to the UVC panel top-right menu → **Invite members** → add collaborators by their **Unity ID email**.
+
+<br/>
+
+**Collaborator (before first session):**
+
+1. Make sure you have Unity Hub and the **same Unity version** installed.
+2. Open **Unity Hub → Version Control** tab (sidebar).  
+   If you don't see it — install **Unity Version Control** from [unity.com/solutions/version-control](https://unity.com/solutions/version-control).
+3. Sign in with your Unity ID (must match the invitation email).
+4. Find the shared repository in the list → click **Get** → choose a local folder.
+5. Unity Hub will download the project and open it automatically.
+6. Open the same scene the host is working on (double-click it in the Project window).
+
+<br/>
+
+**Daily workflow:**
+
+```
+Before session:
+  UVC panel → [ Update workspace ] — pull latest changes
+
+After session:
+  Host saves the scene (Ctrl+S)
+  Host: UVC panel → Pending Changes → [ Checkin ] — push to repo
+  Others: UVC panel → [ Update workspace ] — pull the saved result
+```
+
+> [!NOTE]
+> Only the **host** should save and checkin the scene after a collaborative session.  
+> If multiple people checkin simultaneously, you will get merge conflicts in the `.unity` file.
+
+<br/>
+
+---
+
 ## Quick Start
 
 ### Installation
