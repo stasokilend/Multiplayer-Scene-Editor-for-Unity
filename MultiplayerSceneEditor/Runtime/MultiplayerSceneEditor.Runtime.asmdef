@@ -1,3 +1,4 @@
 {
-  "name": "MultiplayerSceneEditor.Runtime"
+  "name": "MultiplayerSceneEditor.Runtime",
+  "autoReferenced": true
 }

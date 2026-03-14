@@ -1,5 +1,6 @@
 {
   "name": "MultiplayerSceneEditor.Editor",
   "includePlatforms": ["Editor"],
-  "references": ["MultiplayerSceneEditor.Runtime"]
+  "references": ["MultiplayerSceneEditor.Runtime"],
+  "autoReferenced": true
 }
