@@ -19,7 +19,7 @@ namespace MultiplayerSceneEditor
         public string   UserId;
         public string   DisplayName;
         public string   RemoteEndPoint;   // e.g. "192.168.1.42:51234"
-        public double   ReceivedAt;
+        public double   ReceivedAt;       // EditorApplication.timeSinceStartup on main thread
         internal PeerConn Peer;
     }
 
@@ -70,8 +70,8 @@ namespace MultiplayerSceneEditor
             try { _listener?.Stop(); } catch { }
             lock (_lock)
             {
-                foreach (var p in _peers)           p.Dispose();
-                foreach (var kv in _pending)        kv.Value.Dispose();
+                foreach (var p in _peers)    p.Dispose();
+                foreach (var kv in _pending) kv.Value.Dispose();
                 _peers.Clear();
                 _pending.Clear();
             }
@@ -108,6 +108,19 @@ namespace MultiplayerSceneEditor
             catch { }
             peer.Dispose();
             Debug.Log($"[MSE Server] Denied {userId}: {reason}");
+        }
+
+        /// <summary>
+        /// Forcibly disconnect an approved peer (e.g. after timeout detection).
+        /// Fires OnPeerDisconnected internally so UserLeft propagates normally.
+        /// </summary>
+        public void KickPeer(string userId)
+        {
+            PeerConn peer = null;
+            lock (_lock)
+                foreach (var p in _peers)
+                    if (p.UserId == userId) { peer = p; break; }
+            peer?.Dispose();   // triggers OnPeerDisconnected via the read thread
         }
 
         // ── Broadcast / Send ──────────────────────────────────────────────────
@@ -177,6 +190,7 @@ namespace MultiplayerSceneEditor
                 peer.Send(Protocol.Encode(
                     Envelope.Create(MsgType.JoinPending, "server", "{}")));
 
+                // ReceivedAt is set on main thread when dequeued (timeSinceStartup is main-thread only)
                 PendingQueue.Enqueue(new PendingJoin
                 {
                     UserId         = peer.UserId,
@@ -210,7 +224,7 @@ namespace MultiplayerSceneEditor
                 var env = Envelope.Create(MsgType.UserLeft, peer.UserId,
                               Protocol.Ser(new UserInfo { userId = peer.UserId, displayName = peer.DisplayName }));
                 InboundQueue.Enqueue((peer.UserId, env));
-                Broadcast(env);
+                Broadcast(env, exceptUserId: null);
             }
         }
 
@@ -275,7 +289,8 @@ namespace MultiplayerSceneEditor
                     int offset = 0;
                     while (true)
                     {
-                        var env = Protocol.TryDecode(_stageBuf.Slice(offset), _stageLen - offset, out int consumed);
+                        // Zero-allocation decode: pass offset+length directly, no Slice()
+                        var env = Protocol.TryDecode(_stageBuf, offset, _stageLen - offset, out int consumed);
                         if (env == null) break;
                         offset += consumed;
                         _onMsg(this, env);
@@ -283,7 +298,8 @@ namespace MultiplayerSceneEditor
                     if (offset > 0)
                     {
                         _stageLen -= offset;
-                        Buffer.BlockCopy(_stageBuf, offset, _stageBuf, 0, _stageLen);
+                        if (_stageLen > 0)
+                            Buffer.BlockCopy(_stageBuf, offset, _stageBuf, 0, _stageLen);
                     }
                 }
             }
@@ -316,20 +332,6 @@ namespace MultiplayerSceneEditor
             if (_disposed) return;
             _disposed = true;
             try { _tcp.Close(); } catch { }
-        }
-    }
-
-    // ── byte[] slice helper ───────────────────────────────────────────────────
-    internal static class ByteExt
-    {
-        public static byte[] Slice(this byte[] src, int offset)
-        {
-            if (offset == 0) return src;
-            int len = src.Length - offset;
-            if (len <= 0) return Array.Empty<byte>();
-            var dst = new byte[len];
-            Buffer.BlockCopy(src, offset, dst, 0, len);
-            return dst;
         }
     }
 }

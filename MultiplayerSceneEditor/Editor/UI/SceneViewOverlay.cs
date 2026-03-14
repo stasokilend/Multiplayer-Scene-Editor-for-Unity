@@ -6,7 +6,7 @@ namespace MultiplayerSceneEditor
 {
     /// <summary>
     /// Draws all collaborative visuals in every SceneView:
-    ///   • Per-user coloured outline + username chip on every selected object (Google Docs style)
+    ///   • Per-user coloured outline + username chip on every selected object
     ///   • Animated pulsing highlight when two users select the same object
     ///   • Remote cursor crosshairs with name chips
     ///   • Lock badges on objects being edited
@@ -15,14 +15,12 @@ namespace MultiplayerSceneEditor
     [InitializeOnLoad]
     public static class SceneViewOverlay
     {
-        // ── Constants ─────────────────────────────────────────────────────────
-        private const double CURSOR_FADE   = 4.0;
-        private const float  CHIP_HEIGHT   = 18f;
-        private const float  CHIP_PADDING  = 6f;
-        private const float  AVATAR_SIZE   = 22f;
-        private const float  AVATAR_GAP    = 4f;
+        private const double CURSOR_FADE  = 4.0;
+        private const float  CHIP_HEIGHT  = 18f;
+        private const float  CHIP_PADDING = 6f;
+        private const float  AVATAR_SIZE  = 22f;
+        private const float  AVATAR_GAP   = 4f;
 
-        // Cached styles (recreated after domain reload)
         private static GUIStyle _chipStyle;
         private static GUIStyle _lockStyle;
         private static bool     _stylesReady;
@@ -32,41 +30,28 @@ namespace MultiplayerSceneEditor
             SceneView.duringSceneGui += OnSceneGUI;
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Main entry point
-        // ═════════════════════════════════════════════════════════════════════
-
         private static void OnSceneGUI(SceneView sv)
         {
             if (SceneSyncManager.Mode == SessionMode.None) return;
             EnsureStyles();
 
-            // ── Send local cursor position ────────────────────────────────────
             TrackLocalCursor();
 
-            // ── Build per-object selection map  guid → list of users ──────────
             var selMap = BuildSelectionMap();
 
-            // ── Draw each object's overlay ────────────────────────────────────
             foreach (var kv in selMap)
                 DrawObjectOverlay(kv.Key, kv.Value, sv);
 
-            // ── Draw lock badges ──────────────────────────────────────────────
             DrawLockBadges();
 
-            // ── Draw remote cursors ───────────────────────────────────────────
             foreach (var kv in SceneSyncManager.RemoteUsers)
                 DrawRemoteCursor(kv.Value, sv);
 
-            // ── Top-right avatar strip ────────────────────────────────────────
             DrawAvatarStrip(sv);
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Selection map
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Selection map ─────────────────────────────────────────────────────
 
-        // guid → ordered list of (user displayName, userColor)
         private static Dictionary<string, List<(string name, Color col)>> BuildSelectionMap()
         {
             var map = new Dictionary<string, List<(string, Color)>>();
@@ -91,9 +76,7 @@ namespace MultiplayerSceneEditor
             return map;
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Per-object overlay — outline + name chips
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Per-object overlay ────────────────────────────────────────────────
 
         private static void DrawObjectOverlay(
             string guid, List<(string name, Color col)> users, SceneView sv)
@@ -104,17 +87,14 @@ namespace MultiplayerSceneEditor
             Bounds bounds = GetObjectBounds(go);
             double time   = EditorApplication.timeSinceStartup;
 
-            // ── Draw one coloured outline per user (stacked outward) ──────────
+            // One coloured outline per user (stacked slightly outward)
             for (int i = 0; i < users.Count; i++)
             {
                 var (_, col) = users[i];
-
-                // Pulse alpha  (0.6 → 1.0 → 0.6 at ~1 Hz)
-                float pulse = 0.6f + 0.4f * Mathf.Abs(Mathf.Sin((float)(time * Mathf.PI)));
+                float pulse  = 0.6f + 0.4f * Mathf.Abs(Mathf.Sin((float)(time * Mathf.PI)));
                 Color outline = new Color(col.r, col.g, col.b, pulse);
                 Color fill    = new Color(col.r, col.g, col.b, 0.05f + 0.03f * i);
 
-                // Expand bounds slightly per stacked user so outlines don't overlap
                 Bounds expanded = bounds;
                 expanded.Expand(0.04f * (i + 1));
 
@@ -125,8 +105,7 @@ namespace MultiplayerSceneEditor
                 DrawWireBounds(expanded);
             }
 
-            // ── Name chips above the bounding box ────────────────────────────
-            // Find the top-centre of the bounding box in screen space
+            // Name chips above the bounding box
             Vector3 topWorld = bounds.center + Vector3.up * (bounds.extents.y + 0.05f);
 
             Handles.BeginGUI();
@@ -138,38 +117,34 @@ namespace MultiplayerSceneEditor
             totalWidth -= AVATAR_GAP;
 
             float startX = topScreen.x - totalWidth * 0.5f;
-            float y      = topScreen.y - CHIP_HEIGHT - 4f;
+            // BUG FIX: stack chips upward when multiple users share the same object.
+            // Previously the formula ended with "* 0" so all chips rendered at the same y.
+            float baseY  = topScreen.y - CHIP_HEIGHT - 4f;
 
             for (int i = 0; i < users.Count; i++)
             {
                 var (name, col) = users[i];
                 float w = MeasureChip(name);
+                // Each additional chip stacks (CHIP_HEIGHT + 2) px above the previous
+                float y = baseY - i * (CHIP_HEIGHT + 2f);
                 DrawNameChip(new Rect(startX, y, w, CHIP_HEIGHT), name, col);
-                // Stack upward if multiple users on same object
-                if (users.Count > 1)
-                    y -= (CHIP_HEIGHT + 2f) * (users.Count - 1 - i) / (float)users.Count * 0;
                 startX += w + AVATAR_GAP;
             }
 
             Handles.EndGUI();
         }
 
-        // ── Name chip (coloured pill with user name) ──────────────────────────
-
         private static void DrawNameChip(Rect rect, string name, Color col)
         {
-            // Background pill
             Color bg = new Color(col.r * 0.35f, col.g * 0.35f, col.b * 0.35f, 0.92f);
             GUI.DrawTexture(rect, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0,
                             bg, Vector4.zero, new Vector4(rect.height * 0.5f, rect.height * 0.5f,
                                                           rect.height * 0.5f, rect.height * 0.5f));
 
-            // Left colour tab
             GUI.DrawTexture(new Rect(rect.x, rect.y, 4, rect.height),
                             Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0,
                             col, Vector4.zero, new Vector4(2, 0, 0, 2));
 
-            // Text
             GUI.Label(new Rect(rect.x + 6, rect.y, rect.width - 6, rect.height),
                       name, _chipStyle);
         }
@@ -177,12 +152,10 @@ namespace MultiplayerSceneEditor
         private static float MeasureChip(string name)
         {
             float textW = _chipStyle.CalcSize(new GUIContent(name)).x;
-            return textW + CHIP_PADDING * 2 + 6;   // +6 for colour tab
+            return textW + CHIP_PADDING * 2 + 6;
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Lock badges
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Lock badges ───────────────────────────────────────────────────────
 
         private static void DrawLockBadges()
         {
@@ -200,11 +173,9 @@ namespace MultiplayerSceneEditor
 
                 Bounds b = GetObjectBounds(go);
 
-                // Dashed outline
                 Handles.color = col;
                 Handles.DrawDottedLines(GetBoundsEdgePairs(b), 3.5f);
 
-                // Lock chip in top-right corner of the object
                 Vector3 chipPos = b.center + new Vector3(b.extents.x, b.extents.y, -b.extents.z);
                 string label = ru != null ? $"🔒 {ru.Info.displayName}" : "🔒";
 
@@ -220,9 +191,7 @@ namespace MultiplayerSceneEditor
             }
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Remote cursor
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Remote cursor ─────────────────────────────────────────────────────
 
         private static void DrawRemoteCursor(RemoteUser ru, SceneView sv)
         {
@@ -234,17 +203,14 @@ namespace MultiplayerSceneEditor
             Vector3 pos = ru.CursorWorld;
             float size  = HandleUtility.GetHandleSize(pos) * 0.18f;
 
-            // Outer circle
             Handles.color = new Color(col.r, col.g, col.b, alpha * 0.4f);
             Handles.DrawWireDisc(pos, Vector3.up, size * 1.5f);
 
-            // Inner cross
             Handles.color = new Color(col.r, col.g, col.b, alpha);
             Handles.DrawLine(pos - Vector3.right * size,   pos + Vector3.right * size);
             Handles.DrawLine(pos - Vector3.forward * size, pos + Vector3.forward * size);
             Handles.DrawWireDisc(pos, Vector3.up, size * 0.35f);
 
-            // Name chip
             DrawNameChipAt(pos + Vector3.up * size * 2f, ru.Info.displayName, col, alpha);
         }
 
@@ -269,9 +235,7 @@ namespace MultiplayerSceneEditor
             Handles.EndGUI();
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Avatar strip  (top-right corner of the SceneView)
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Avatar strip ──────────────────────────────────────────────────────
 
         private static void DrawAvatarStrip(SceneView sv)
         {
@@ -279,20 +243,17 @@ namespace MultiplayerSceneEditor
 
             var allUsers = new List<(string name, Color col, bool isLocal)>();
 
-            // Local user
             var lu = SceneSyncManager.LocalUser;
             if (lu != null)
                 allUsers.Add((lu.displayName, Color.HSVToRGB(lu.colorH, 0.85f, 0.95f), true));
 
-            // Remote users
             foreach (var kv in SceneSyncManager.RemoteUsers)
                 allUsers.Add((kv.Value.Info.displayName, kv.Value.UserColor, false));
 
-            // ── Mode pill ─────────────────────────────────────────────────────
-            string modeTxt  = SceneSyncManager.Mode == SessionMode.Hosting ? "HOST" : "CLIENT";
-            Color  modeBg   = SceneSyncManager.Mode == SessionMode.Hosting
-                              ? new Color(0.2f, 0.5f, 0.2f, 0.9f)
-                              : new Color(0.15f, 0.3f, 0.55f, 0.9f);
+            string modeTxt = SceneSyncManager.Mode == SessionMode.Hosting ? "HOST" : "CLIENT";
+            Color  modeBg  = SceneSyncManager.Mode == SessionMode.Hosting
+                             ? new Color(0.2f, 0.5f, 0.2f, 0.9f)
+                             : new Color(0.15f, 0.3f, 0.55f, 0.9f);
 
             float panelRight = sv.position.width - 8;
             float panelY     = 8f;
@@ -310,7 +271,6 @@ namespace MultiplayerSceneEditor
                           normal    = { textColor = Color.white }
                       });
 
-            // ── Avatar circles ────────────────────────────────────────────────
             float ax = panelRight - pillW - AVATAR_GAP;
             float ay = panelY;
 
@@ -319,14 +279,12 @@ namespace MultiplayerSceneEditor
                 ax -= AVATAR_SIZE;
                 var aRect = new Rect(ax, ay, AVATAR_SIZE, AVATAR_SIZE);
 
-                // Circle background
                 GUI.DrawTexture(aRect, Texture2D.whiteTexture, ScaleMode.StretchToFill,
                                 true, 0,
                                 isLocal ? new Color(col.r, col.g, col.b, 0.95f)
                                         : new Color(col.r * 0.7f, col.g * 0.7f, col.b * 0.7f, 0.9f),
                                 Vector4.zero, Vector4.one * (AVATAR_SIZE * 0.5f));
 
-                // Initials
                 string init = name.Length > 0 ? name[..1].ToUpper() : "?";
                 GUI.Label(aRect, init,
                           new GUIStyle(EditorStyles.boldLabel)
@@ -336,7 +294,6 @@ namespace MultiplayerSceneEditor
                               normal    = { textColor = Color.white }
                           });
 
-                // Tooltip-style name on hover
                 if (aRect.Contains(Event.current.mousePosition))
                 {
                     float tw = EditorStyles.boldLabel.CalcSize(new GUIContent(name)).x + 16;
@@ -358,9 +315,7 @@ namespace MultiplayerSceneEditor
             Handles.EndGUI();
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Local cursor tracking → send to remote
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Local cursor tracking ─────────────────────────────────────────────
 
         private static void TrackLocalCursor()
         {
@@ -369,15 +324,17 @@ namespace MultiplayerSceneEditor
 
             Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
 
-            // Try scene objects first (Physics.Raycast needs play mode, use HandleUtility)
+            // FIX: Physics.Raycast is unavailable in edit mode (PhysX is off).
+            // Use HandleUtility.RaySnap first (snaps to geometry via editor picking),
+            // then fall back to a horizontal plane at y = 0.
             Vector3 world;
-            if (Physics.Raycast(ray, out RaycastHit hit))
+            object snapHit = HandleUtility.RaySnap(ray);
+            if (snapHit is RaycastHit hit)
             {
                 world = hit.point;
             }
             else
             {
-                // Fallback: intersect with horizontal plane at y = 0
                 var plane = new Plane(Vector3.up, Vector3.zero);
                 world = plane.Raycast(ray, out float d) ? ray.GetPoint(d) : ray.GetPoint(10f);
             }
@@ -385,9 +342,7 @@ namespace MultiplayerSceneEditor
             SceneSyncManager.Tracker.TrySendCursor(world);
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        //  Geometry helpers
-        // ═════════════════════════════════════════════════════════════════════
+        // ── Geometry helpers ──────────────────────────────────────────────────
 
         private static Bounds GetObjectBounds(GameObject go)
         {
@@ -401,8 +356,8 @@ namespace MultiplayerSceneEditor
 
         private static void DrawWireBounds(Bounds b)
         {
-            var c = b.center; var e = b.extents;
-            var p = GetBoundsCorners8(c, e);
+            var c = b.center; var ex = b.extents;
+            var p = GetBoundsCorners8(c, ex);
             int[] edges = { 0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7 };
             for (int i = 0; i < edges.Length; i += 2)
                 Handles.DrawLine(p[edges[i]], p[edges[i+1]]);
@@ -410,9 +365,8 @@ namespace MultiplayerSceneEditor
 
         private static void DrawSolidBounds(Bounds b)
         {
-            var c = b.center; var e = b.extents;
-            // Draw 6 faces as quads
-            var p = GetBoundsCorners8(c, e);
+            var c = b.center; var ex = b.extents;
+            var p = GetBoundsCorners8(c, ex);
             int[][] faces = {
                 new[]{0,1,2,3}, new[]{4,5,6,7},
                 new[]{0,1,5,4}, new[]{2,3,7,6},
@@ -442,10 +396,6 @@ namespace MultiplayerSceneEditor
                 p[0],p[4], p[1],p[5], p[2],p[6], p[3],p[7],
             };
         }
-
-        // ═════════════════════════════════════════════════════════════════════
-        //  Style init
-        // ═════════════════════════════════════════════════════════════════════
 
         private static void EnsureStyles()
         {

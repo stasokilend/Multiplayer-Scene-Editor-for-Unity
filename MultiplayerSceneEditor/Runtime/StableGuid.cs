@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -9,6 +10,9 @@ namespace MultiplayerSceneEditor
     /// <summary>
     /// Attaches a stable GUID to every GameObject so we can track it across sessions.
     /// Hidden from inspector and Add Component menus — managed automatically.
+    ///
+    /// Maintains a static cache (guid → component) so Find() is O(1) instead of O(n).
+    /// The cache is populated in Awake (fires after domain reload too) and cleared in OnDestroy.
     /// </summary>
     [ExecuteInEditMode]
     [AddComponentMenu("")]
@@ -18,12 +22,19 @@ namespace MultiplayerSceneEditor
         [SerializeField, HideInInspector]
         private string _guid = "";
 
+        // O(1) lookup cache — populated by Awake, cleared by OnDestroy
+        private static readonly Dictionary<string, StableGuid> _cache
+            = new Dictionary<string, StableGuid>();
+
         public string Guid
         {
             get
             {
                 if (string.IsNullOrEmpty(_guid))
+                {
                     _guid = System.Guid.NewGuid().ToString("N");
+                    _cache[_guid] = this;
+                }
                 return _guid;
             }
         }
@@ -32,11 +43,15 @@ namespace MultiplayerSceneEditor
         {
             if (string.IsNullOrEmpty(_guid))
                 _guid = System.Guid.NewGuid().ToString("N");
+            _cache[_guid] = this;
         }
 
-        // ──────────────────────────────────────────────
-        //  Static helpers (Editor-only)
-        // ──────────────────────────────────────────────
+        private void OnDestroy()
+        {
+            if (!string.IsNullOrEmpty(_guid) &&
+                _cache.TryGetValue(_guid, out var cached) && cached == this)
+                _cache.Remove(_guid);
+        }
 
 #if UNITY_EDITOR
         /// <summary>Gets existing GUID or adds the component and creates one.</summary>
@@ -58,16 +73,28 @@ namespace MultiplayerSceneEditor
             return sg != null ? sg.Guid : null;
         }
 
-        /// <summary>Finds a GameObject by its stable GUID in the loaded scenes.</summary>
+        /// <summary>
+        /// Finds a GameObject by its stable GUID. O(1) via cache; falls back to linear
+        /// scan only after domain reload (before the first Awake fires on cached objects).
+        /// </summary>
         public static GameObject Find(string guid)
         {
             if (string.IsNullOrEmpty(guid)) return null;
+
+            // Fast path
+            if (_cache.TryGetValue(guid, out var sg) && sg != null && sg.gameObject != null)
+                return sg.gameObject;
+
+            // Slow path (post-domain-reload warm-up) — also repairs the cache
 #if UNITY_2023_1_OR_NEWER
-            foreach (var sg in FindObjectsByType<StableGuid>(FindObjectsSortMode.None))
+            foreach (var s in UnityEngine.Object.FindObjectsByType<StableGuid>(FindObjectsSortMode.None))
 #else
-            foreach (var sg in FindObjectsOfType<StableGuid>())
+            foreach (var s in UnityEngine.Object.FindObjectsOfType<StableGuid>())
 #endif
-                if (sg.Guid == guid) return sg.gameObject;
+            {
+                _cache[s.Guid] = s;   // repair all, not just the one we need
+                if (s.Guid == guid) return s.gameObject;
+            }
             return null;
         }
 #endif

@@ -38,17 +38,30 @@ namespace MultiplayerSceneEditor
         private static NetworkClient _client;
         private static float         _nextHue = 0f;
 
-        // Chat log
-        public static List<(string name, string msg, double time)> ChatLog { get; }
-            = new List<(string, string, double)>();
+        // Chat log — uses DateTime so timestamps survive domain reload
+        public static List<(string senderId, string name, string msg, DateTime time)> ChatLog { get; }
+            = new List<(string, string, string, DateTime)>();
 
         // Events (main thread)
         public static event Action OnUsersChanged;
-        public static event Action OnPendingJoinsChanged;          // new pending request arrived
-        public static event Action<string, string> OnChatReceived; // (displayName, message)
+        public static event Action OnPendingJoinsChanged;              // new pending request arrived
+        public static event Action<string, string> OnChatReceived;     // (displayName, message)
         public static event Action OnSessionEnded;
-        public static event Action<string> OnJoinDenied;           // client: fired when host denies us
-        public static event Action OnApprovalPending;              // client: fired when waiting for host
+        public static event Action<string> OnJoinDenied;               // client: fired when host denies us
+        public static event Action<string> OnRemoteSelectionChanged;   // (userId) remote user changed selection
+        public static event Action OnApprovalPending;                  // client: fired when waiting for host
+
+        // ── Echo-loop prevention ──────────────────────────────────────────────
+        /// <summary>
+        /// Set to true while applying incoming remote changes so ObjectTracker
+        /// ignores the Unity events they generate and doesn't echo them back.
+        /// </summary>
+        internal static bool SuppressTrackerEvents;
+
+        // ── Heartbeat (detect dead TCP connections) ───────────────────────────
+        private static double _lastPingTime;
+        private const  double PING_INTERVAL    = 5.0;   // send Ping every 5 s
+        private const  double PONG_TIMEOUT     = 20.0;  // kick if no Pong in 20 s
 
         // ── Static constructor (registers update loop) ────────────────────────
 
@@ -76,6 +89,7 @@ namespace MultiplayerSceneEditor
             Mode = SessionMode.Hosting;
             Tracker.Activate(LocalUser.userId);
 
+            _lastPingTime = EditorApplication.timeSinceStartup;
             Debug.Log($"[MSE] Hosting session on port {port} as {displayName}");
         }
 
@@ -93,9 +107,10 @@ namespace MultiplayerSceneEditor
             _client = new NetworkClient();
             _client.Connect(host, port, LocalUser);   // throws on immediate failure
 
-            // Don't set Mode = Connected yet — we're waiting for host approval
+            // Mode = Connected but Tracker NOT activated yet.
+            // Tracker.Activate is called in HandleHandshakeAck after the host approves us,
+            // to prevent accumulated local changes from echoing as a burst of outgoing packets.
             Mode = SessionMode.Connected;
-            Tracker.Activate(LocalUser.userId);
 
             Debug.Log($"[MSE] Join request sent to {host}:{port} as \"{displayName}\". Waiting for host approval…");
         }
@@ -116,7 +131,9 @@ namespace MultiplayerSceneEditor
             RemoteUsers.Clear();
             ChatLog.Clear();
 
-            Mode = SessionMode.None;
+            Mode      = SessionMode.None;
+            _nextHue  = 0f;   // reset colour wheel for next session
+
             OnSessionEnded?.Invoke();
             OnUsersChanged?.Invoke();
             SceneView.RepaintAll();
@@ -129,7 +146,12 @@ namespace MultiplayerSceneEditor
         {
             if (Mode == SessionMode.None) return;
             Broadcast(Envelope.Create(MsgType.ChatMessage, LocalUser.userId,
-                Protocol.Ser(new ChatPayload { message = message, displayName = LocalUser.displayName })));
+                Protocol.Ser(new ChatPayload
+                {
+                    message     = message,
+                    displayName = LocalUser.displayName,
+                    senderId    = LocalUser.userId,
+                })));
         }
 
         // ── Approval API (host only) ──────────────────────────────────────────
@@ -143,10 +165,8 @@ namespace MultiplayerSceneEditor
             var peer = _server.ApprovePeer(pj.UserId);
             if (peer == null) return;   // already gone
 
-            // Assign colour
             float hue = AllocHue();
 
-            // Build welcome payload
             var approvedUser = new UserInfo
             {
                 userId      = pj.UserId,
@@ -191,7 +211,6 @@ namespace MultiplayerSceneEditor
 
         // ── Local IP helper ───────────────────────────────────────────────────
 
-        /// <summary>Returns all non-loopback IPv4 addresses on this machine.</summary>
         public static List<string> GetLocalIPAddresses()
         {
             var result = new List<string>();
@@ -226,6 +245,7 @@ namespace MultiplayerSceneEditor
                 bool changed = false;
                 while (_server.PendingQueue.TryDequeue(out var pj))
                 {
+                    pj.ReceivedAt = EditorApplication.timeSinceStartup;   // set here on main thread
                     PendingJoins.Add(pj);
                     changed = true;
                 }
@@ -238,6 +258,33 @@ namespace MultiplayerSceneEditor
                 // Drain approved inbound
                 while (_server.InboundQueue.TryDequeue(out var tuple))
                     HandleIncoming(tuple.fromUserId, tuple.env, isServer: true);
+
+                // ── Heartbeat (Ping → all clients) ────────────────────────────
+                double now = EditorApplication.timeSinceStartup;
+                if (now - _lastPingTime > PING_INTERVAL)
+                {
+                    _lastPingTime = now;
+                    _server.Broadcast(Envelope.Create(MsgType.Ping, LocalUser.userId, ""));
+
+                    // Kick peers who haven't responded in PONG_TIMEOUT seconds
+                    var dead = new List<string>();
+                    foreach (var kv in RemoteUsers)
+                    {
+                        var ru = kv.Value;
+                        // Only check after the first pong has been received
+                        if (ru.LastPongTime > 0 && now - ru.LastPongTime > PONG_TIMEOUT)
+                            dead.Add(kv.Key);
+                    }
+                    foreach (var uid in dead)
+                    {
+                        string name = RemoteUsers[uid].Info.displayName;
+                        Debug.LogWarning($"[MSE] {name} timed out — kicking.");
+                        _server.KickPeer(uid);
+                        RemoteUsers.Remove(uid);
+                        Locks.ReleaseAll(uid);
+                        OnUsersChanged?.Invoke();
+                    }
+                }
             }
 
             // ── Client: drain inbound ─────────────────────────────────────────
@@ -299,7 +346,6 @@ namespace MultiplayerSceneEditor
 
             switch (type)
             {
-                // Handshake is now handled via PendingQueue / ApproveJoin — ignore here
                 case MsgType.Handshake:
                     break;
 
@@ -317,14 +363,21 @@ namespace MultiplayerSceneEditor
 
                 case MsgType.TransformUpdate:
                     if (env.userId != LocalUser.userId)
-                        ApplyTransformUpdate(env);
-                    // If server, relay to others
+                    {
+                        SuppressTrackerEvents = true;
+                        try { ApplyTransformUpdate(env); }
+                        finally { SuppressTrackerEvents = false; }
+                    }
                     if (isServer) _server.Broadcast(env, exceptUserId: env.userId);
                     break;
 
                 case MsgType.HierarchyChange:
                     if (env.userId != LocalUser.userId)
-                        ApplyHierarchyChange(env);
+                    {
+                        SuppressTrackerEvents = true;
+                        try { ApplyHierarchyChange(env); }
+                        finally { SuppressTrackerEvents = false; }
+                    }
                     if (isServer) _server.Broadcast(env, exceptUserId: env.userId);
                     break;
 
@@ -363,6 +416,12 @@ namespace MultiplayerSceneEditor
                     if (isServer) _server.SendTo(fromUserId, pong);
                     else _client?.Send(pong);
                     break;
+
+                case MsgType.Pong:
+                    // Update last-seen time for heartbeat timeout detection
+                    if (RemoteUsers.TryGetValue(env.userId, out var pongUser))
+                        pongUser.LastPongTime = EditorApplication.timeSinceStartup;
+                    break;
             }
 
             SceneView.RepaintAll();
@@ -382,8 +441,13 @@ namespace MultiplayerSceneEditor
                 if (u.userId != LocalUser.userId)
                     RemoteUsers[u.userId] = new RemoteUser { Info = u };
 
-            // Apply scene snapshot
-            ApplySceneSnapshot(ack.sceneSnapshot);
+            // Apply scene snapshot with suppression so we don't echo it back
+            SuppressTrackerEvents = true;
+            try { ApplySceneSnapshot(ack.sceneSnapshot); }
+            finally { SuppressTrackerEvents = false; }
+
+            // NOW activate tracker — only after we're fully set up
+            Tracker.Activate(LocalUser.userId);
 
             OnUsersChanged?.Invoke();
         }
@@ -411,10 +475,9 @@ namespace MultiplayerSceneEditor
 
         private static void ApplyTransformUpdate(Envelope env)
         {
-            var p  = Protocol.Des<TransformPayload>(env.payload);
+            var p = Protocol.Des<TransformPayload>(env.payload);
 
-            // Store as interpolation target for the owning remote user
-            if (SceneSyncManager.RemoteUsers.TryGetValue(env.userId, out var ru))
+            if (RemoteUsers.TryGetValue(env.userId, out var ru))
             {
                 if (!ru.TransformTargets.TryGetValue(p.guid, out var tgt))
                 {
@@ -435,17 +498,16 @@ namespace MultiplayerSceneEditor
                 }
             }
 
-            // Also apply immediately so the object moves even if we skip a frame
             var go = StableGuid.Find(p.guid);
             if (go == null) return;
             Protocol.ApplyPayload(p, go.transform);
         }
 
-        // ── Interpolation tick (called from Tick every frame) ─────────────────
+        // ── Interpolation tick ────────────────────────────────────────────────
 
         private static void TickInterpolation()
         {
-            const float LERP_SPEED = 25f;   // higher = snappier; 25 ≈ ~40 ms lag
+            const float LERP_SPEED = 25f;
             float dt = (float)(EditorApplication.timeSinceStartup - _lastTickTime);
             _lastTickTime = EditorApplication.timeSinceStartup;
             float t = Mathf.Clamp01(LERP_SPEED * dt);
@@ -485,7 +547,7 @@ namespace MultiplayerSceneEditor
             {
                 case "create":
                 {
-                    if (StableGuid.Find(p.guid) != null) return; // already exists
+                    if (StableGuid.Find(p.guid) != null) return;
 
                     var parent = string.IsNullOrEmpty(p.parentGuid) ? null : StableGuid.Find(p.parentGuid);
                     var go     = new GameObject(p.name);
@@ -495,7 +557,6 @@ namespace MultiplayerSceneEditor
                     go.transform.localScale = new Vector3(p.sx, p.sy, p.sz);
                     go.SetActive(p.active);
 
-                    // Attach StableGuid with specific id
                     var sg = go.AddComponent<StableGuid>();
                     var fi = typeof(StableGuid).GetField("_guid",
                                  System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -546,20 +607,19 @@ namespace MultiplayerSceneEditor
         private static void ApplySelectionUpdate(Envelope env)
         {
             if (!RemoteUsers.TryGetValue(env.userId, out var ru)) return;
-            var p     = Protocol.Des<SelectionPayload>(env.payload);
-            var prev  = new HashSet<string>(ru.SelectedGuids);
+            var p    = Protocol.Des<SelectionPayload>(env.payload);
+            var prev = new HashSet<string>(ru.SelectedGuids);
 
-            // Release locks for deselected
             foreach (var g in prev)
                 if (!Array.Exists(p.guids, x => x == g))
                     Locks.Release(g, env.userId);
 
-            // Acquire locks for newly selected
             foreach (var g in p.guids)
                 if (!prev.Contains(g))
                     Locks.TryAcquire(g, env.userId);
 
             ru.SelectedGuids = new HashSet<string>(p.guids);
+            OnRemoteSelectionChanged?.Invoke(env.userId);
             SceneView.RepaintAll();
         }
 
@@ -592,14 +652,14 @@ namespace MultiplayerSceneEditor
         {
             if (!RemoteUsers.TryGetValue(env.userId, out var ru)) return;
             var p = Protocol.Des<CursorPayload>(env.payload);
-            ru.CursorWorld = new Vector3(p.x, p.y, p.z);
+            ru.CursorWorld    = new Vector3(p.x, p.y, p.z);
             ru.LastCursorTime = EditorApplication.timeSinceStartup;
         }
 
         private static void ApplyChatMessage(Envelope env)
         {
             var p = Protocol.Des<ChatPayload>(env.payload);
-            ChatLog.Add((p.displayName, p.message, EditorApplication.timeSinceStartup));
+            ChatLog.Add((p.senderId, p.displayName, p.message, DateTime.Now));
             OnChatReceived?.Invoke(p.displayName, p.message);
         }
 
@@ -626,7 +686,6 @@ namespace MultiplayerSceneEditor
                 var go = StableGuid.Find(s.guid);
                 if (go == null)
                 {
-                    // Create missing object
                     var env = Envelope.Create(MsgType.HierarchyChange, "snapshot",
                                   Protocol.Ser(new HierarchyPayload
                                   {
@@ -643,7 +702,6 @@ namespace MultiplayerSceneEditor
                 }
                 else
                 {
-                    // Sync transform
                     go.transform.position   = new Vector3(s.px, s.py, s.pz);
                     go.transform.rotation   = new Quaternion(s.rx, s.ry, s.rz, s.rw);
                     go.transform.localScale = new Vector3(s.sx, s.sy, s.sz);
@@ -652,7 +710,7 @@ namespace MultiplayerSceneEditor
             }
         }
 
-        // ── Broadcast (server relays; client sends to server) ─────────────────
+        // ── Broadcast ─────────────────────────────────────────────────────────
 
         private static void Broadcast(Envelope env)
         {
@@ -667,7 +725,7 @@ namespace MultiplayerSceneEditor
         private static float AllocHue()
         {
             float h  = _nextHue;
-            _nextHue = (_nextHue + 0.17f) % 1f;   // golden-angle-ish spread
+            _nextHue = (_nextHue + 0.17f) % 1f;
             return h;
         }
     }
@@ -680,15 +738,14 @@ namespace MultiplayerSceneEditor
         public HashSet<string>  SelectedGuids  = new HashSet<string>();
         public Vector3          CursorWorld;
         public double           LastCursorTime;
+        public double           LastPongTime;   // used by heartbeat to detect dead connections
 
-        // Per-guid interpolation targets (smooth inbound transforms)
         public Dictionary<string, TransformTarget> TransformTargets
             = new Dictionary<string, TransformTarget>();
 
         public Color UserColor => Color.HSVToRGB(Info.colorH, 0.85f, 0.95f);
     }
 
-    /// <summary>Smooth interpolation target for a remote transform.</summary>
     public class TransformTarget
     {
         public Vector3    Position;
@@ -696,7 +753,6 @@ namespace MultiplayerSceneEditor
         public Vector3    Scale;
         public double     ReceivedAt;
 
-        // Current lerped state (applied to the object each frame)
         public Vector3    CurPosition;
         public Quaternion CurRotation;
         public Vector3    CurScale;

@@ -134,6 +134,7 @@ namespace MultiplayerSceneEditor
     {
         public string message;
         public string displayName;
+        public string senderId;   // userId — reliable colour lookup even with duplicate names
     }
 
     [Serializable]
@@ -179,19 +180,21 @@ namespace MultiplayerSceneEditor
 
         // ── Decode ──────────────────────────────────────────────────────────
         /// <summary>
-        /// Reads one message from a stream buffer. Returns the Envelope and
-        /// advances <paramref name="consumed"/> by the number of bytes used.
-        /// Returns null when the buffer doesn't contain a full message.
+        /// Reads one message from a buffer at the given offset.
+        /// No allocation — reads directly from the shared staging buffer.
+        /// Returns null when the buffer doesn't contain a full message yet.
         /// </summary>
-        public static Envelope TryDecode(byte[] buf, int available, out int consumed)
+        public static Envelope TryDecode(byte[] buf, int offset, int available, out int consumed)
         {
             consumed = 0;
             if (available < LENGTH_PREFIX) return null;
 
-            int len = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+            int len = (buf[offset]     << 24) | (buf[offset + 1] << 16) |
+                      (buf[offset + 2] <<  8) |  buf[offset + 3];
+
             if (available < LENGTH_PREFIX + len) return null;
 
-            string json = Encoding.UTF8.GetString(buf, LENGTH_PREFIX, len);
+            string json = Encoding.UTF8.GetString(buf, offset + LENGTH_PREFIX, len);
             consumed = LENGTH_PREFIX + len;
             return JsonUtility.FromJson<Envelope>(json);
         }

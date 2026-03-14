@@ -14,6 +14,11 @@ namespace MultiplayerSceneEditor
     ///
     ///   ObjectChangeEvents / Undo.postprocessModifications catch everything else
     ///   (rename, reparent, activate, component edits, …).
+    ///
+    /// Echo-loop prevention:
+    ///   When SceneSyncManager is applying an incoming remote change it sets
+    ///   SuppressTrackerEvents = true. Every event handler bails out immediately
+    ///   so that remote-created / remote-moved objects don't echo back as local changes.
     /// </summary>
     public class ObjectTracker
     {
@@ -86,7 +91,8 @@ namespace MultiplayerSceneEditor
 
         private void OnUpdate()
         {
-            if (!_active) return;
+            // Echo-loop guard: don't track changes we're applying from remote
+            if (!_active || SceneSyncManager.SuppressTrackerEvents) return;
 
             double now = EditorApplication.timeSinceStartup;
             if (now - _lastTransformPoll < TRANSFORM_INTERVAL) return;
@@ -106,7 +112,8 @@ namespace MultiplayerSceneEditor
 
         private UndoPropertyModification[] OnUndoMods(UndoPropertyModification[] mods)
         {
-            if (!_active) return mods;
+            if (!_active || SceneSyncManager.SuppressTrackerEvents) return mods;
+
             var dirty = new HashSet<string>();
             foreach (var mod in mods)
             {
@@ -127,7 +134,7 @@ namespace MultiplayerSceneEditor
 
         private void OnObjectChanges(ref ObjectChangeEventStream stream)
         {
-            if (!_active) return;
+            if (!_active || SceneSyncManager.SuppressTrackerEvents) return;
 
             for (int i = 0; i < stream.length; i++)
             {
@@ -177,13 +184,14 @@ namespace MultiplayerSceneEditor
 
         private void OnHierarchyChanged()
         {
-            if (!_active) return;
+            if (!_active || SceneSyncManager.SuppressTrackerEvents) return;
             RebuildSnapshot();
         }
 
         private void OnSelectionChanged()
         {
-            if (!_active) return;
+            if (!_active || SceneSyncManager.SuppressTrackerEvents) return;
+
             var guids = new List<string>();
             foreach (var go in Selection.gameObjects)
             {

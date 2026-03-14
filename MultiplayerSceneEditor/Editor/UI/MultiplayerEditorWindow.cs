@@ -23,13 +23,13 @@ namespace MultiplayerSceneEditor
         // ── GUI state ─────────────────────────────────────────────────────────
 
         private enum Tab { Session, Users, Chat }
-        private Tab    _tab = Tab.Session;
+        private Tab _tab = Tab.Session;
 
         // Setup form
         private string _displayName  = "Editor_" + System.Environment.UserName.Replace(" ", "");
         private string _hostAddress  = "127.0.0.1";
         private int    _port         = 7700;
-        private int    _selectedIPIdx = 0;          // index into local IP list
+        private int    _selectedIPIdx = 0;
         private List<string> _localIPs = new List<string>();
         private bool   _ipsFetched   = false;
 
@@ -39,8 +39,9 @@ namespace MultiplayerSceneEditor
         private Vector2 _userScroll;
 
         // Log
-        private bool          _showLog = false;
-        private List<string>  _logLines = new List<string>();
+        private bool          _showLog   = false;
+        private Vector2       _logScroll;           // FIX: was Vector2.zero (not saved), scroll didn't work
+        private List<string>  _logLines  = new List<string>();
 
         // Denial dialog
         private string _denialMessage = null;
@@ -49,24 +50,26 @@ namespace MultiplayerSceneEditor
 
         private void OnEnable()
         {
-            SceneSyncManager.OnUsersChanged       += Repaint;
-            SceneSyncManager.OnPendingJoinsChanged += Repaint;
-            SceneSyncManager.OnChatReceived        += OnChat;
-            SceneSyncManager.OnSessionEnded        += OnSessionEnded;
-            SceneSyncManager.OnJoinDenied          += OnDenied;
-            SceneSyncManager.OnApprovalPending     += Repaint;
-            Application.logMessageReceived         += OnLog;
+            SceneSyncManager.OnUsersChanged            += Repaint;
+            SceneSyncManager.OnPendingJoinsChanged     += Repaint;
+            SceneSyncManager.OnChatReceived            += OnChat;
+            SceneSyncManager.OnSessionEnded            += OnSessionEnded;
+            SceneSyncManager.OnJoinDenied              += OnDenied;
+            SceneSyncManager.OnApprovalPending         += Repaint;
+            SceneSyncManager.OnRemoteSelectionChanged  += OnSelectionChanged;
+            Application.logMessageReceived             += OnLog;
         }
 
         private void OnDisable()
         {
-            SceneSyncManager.OnUsersChanged       -= Repaint;
-            SceneSyncManager.OnPendingJoinsChanged -= Repaint;
-            SceneSyncManager.OnChatReceived        -= OnChat;
-            SceneSyncManager.OnSessionEnded        -= OnSessionEnded;
-            SceneSyncManager.OnJoinDenied          -= OnDenied;
-            SceneSyncManager.OnApprovalPending     -= Repaint;
-            Application.logMessageReceived         -= OnLog;
+            SceneSyncManager.OnUsersChanged            -= Repaint;
+            SceneSyncManager.OnPendingJoinsChanged     -= Repaint;
+            SceneSyncManager.OnChatReceived            -= OnChat;
+            SceneSyncManager.OnSessionEnded            -= OnSessionEnded;
+            SceneSyncManager.OnJoinDenied              -= OnDenied;
+            SceneSyncManager.OnApprovalPending         -= Repaint;
+            SceneSyncManager.OnRemoteSelectionChanged  -= OnSelectionChanged;
+            Application.logMessageReceived             -= OnLog;
         }
 
         private void OnChat(string name, string msg)
@@ -87,6 +90,9 @@ namespace MultiplayerSceneEditor
             Repaint();
         }
 
+        // FIX: Users tab now refreshes when a remote user changes their selection
+        private void OnSelectionChanged(string _userId) => Repaint();
+
         private void OnLog(string msg, string stack, LogType type)
         {
             if (!msg.StartsWith("[MSE")) return;
@@ -101,7 +107,6 @@ namespace MultiplayerSceneEditor
         {
             DrawHeader();
 
-            // Denial overlay
             if (_denialMessage != null)
             {
                 DrawDenialBanner(_denialMessage);
@@ -177,14 +182,13 @@ namespace MultiplayerSceneEditor
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        //  SETUP PANEL  (no active session)
+        //  SETUP PANEL
         // ═══════════════════════════════════════════════════════════════════════
 
         private void DrawSetupPanel()
         {
             GUILayout.Space(8);
 
-            // ── Identity ──────────────────────────────────────────────────────
             GUILayout.Label("Identity", EditorStyles.boldLabel);
             using (new EditorGUI.IndentLevelScope(1))
                 _displayName = EditorGUILayout.TextField("Your Name", _displayName);
@@ -193,34 +197,29 @@ namespace MultiplayerSceneEditor
             DrawSeparator();
             GUILayout.Space(8);
 
-            // ── HOST SECTION ──────────────────────────────────────────────────
             GUILayout.Label("Host a Session", EditorStyles.boldLabel);
 
             using (new EditorGUI.IndentLevelScope(1))
             {
                 _port = EditorGUILayout.IntField("Port", _port);
 
-                // Fetch IPs lazily
                 if (!_ipsFetched)
                 {
                     _localIPs   = SceneSyncManager.GetLocalIPAddresses();
                     _ipsFetched = true;
                 }
 
-                // IP address selector
                 if (_localIPs.Count > 0)
                 {
                     GUILayout.BeginHorizontal();
                     EditorGUILayout.PrefixLabel("Share this IP");
                     _selectedIPIdx = Mathf.Clamp(_selectedIPIdx, 0, _localIPs.Count - 1);
 
-                    // Popup to pick among multiple interfaces
                     if (_localIPs.Count > 1)
                         _selectedIPIdx = EditorGUILayout.Popup(_selectedIPIdx, _localIPs.ToArray());
 
                     string displayIP = _localIPs[_selectedIPIdx];
 
-                    // Read-only styled text field
                     var ipStyle = new GUIStyle(EditorStyles.textField)
                     { normal = { textColor = new Color(0.3f, 0.9f, 0.3f) } };
                     EditorGUILayout.SelectableLabel(displayIP, ipStyle,
@@ -252,11 +251,9 @@ namespace MultiplayerSceneEditor
             DrawSeparator();
             GUILayout.Space(8);
 
-            // ── JOIN SECTION ──────────────────────────────────────────────────
             GUILayout.Label("Join a Session", EditorStyles.boldLabel);
             using (new EditorGUI.IndentLevelScope(1))
             {
-                // IP address field
                 GUILayout.BeginHorizontal();
                 _hostAddress = EditorGUILayout.TextField("Host IP", _hostAddress);
                 if (GUILayout.Button("Paste", GUILayout.Width(44)))
@@ -283,7 +280,6 @@ namespace MultiplayerSceneEditor
             }
             GUI.backgroundColor = Color.white;
 
-            // ── Firewall hint ─────────────────────────────────────────────────
             GUILayout.Space(10);
             EditorGUILayout.HelpBox(
                 "💡  Make sure port " + _port + " is open in your firewall.\n" +
@@ -297,12 +293,11 @@ namespace MultiplayerSceneEditor
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        //  SESSION PANEL  (connected / hosting)
+        //  SESSION PANEL
         // ═══════════════════════════════════════════════════════════════════════
 
         private void DrawSessionPanel()
         {
-            // ── Pending join notifications (HOST only) ────────────────────────
             if (SceneSyncManager.Mode == SessionMode.Hosting &&
                 SceneSyncManager.PendingJoins.Count > 0)
             {
@@ -310,7 +305,6 @@ namespace MultiplayerSceneEditor
                 DrawSeparator();
             }
 
-            // ── Waiting-for-approval banner (CLIENT) ──────────────────────────
             if (SceneSyncManager.Mode == SessionMode.Connected &&
                 SceneSyncManager.ClientConnectionState == ClientState.WaitingApproval)
             {
@@ -349,6 +343,16 @@ namespace MultiplayerSceneEditor
                     { normal = { textColor = new Color(1f, 0.85f, 0.3f) } };
                     GUILayout.Label($"🔔  \"{pj.DisplayName}\" wants to join", nameStyle);
                     GUILayout.FlexibleSpace();
+
+                    // Show how long they've been waiting
+                    if (pj.ReceivedAt > 0)
+                    {
+                        double waited = EditorApplication.timeSinceStartup - pj.ReceivedAt;
+                        string waitStr = waited < 60 ? $"{(int)waited}s" : $"{(int)(waited/60)}m";
+                        GUILayout.Label(waitStr,
+                            new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = Color.gray } });
+                    }
+
                     GUILayout.Label(pj.RemoteEndPoint,
                         new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = Color.gray } });
                     GUILayout.Space(6);
@@ -374,7 +378,7 @@ namespace MultiplayerSceneEditor
             }
         }
 
-        // ── Waiting for approval (client side) ───────────────────────────────
+        // ── Waiting for approval ──────────────────────────────────────────────
 
         private void DrawWaitingBanner()
         {
@@ -420,7 +424,6 @@ namespace MultiplayerSceneEditor
             DrawInfoRow("Port",  _port.ToString());
             if (SceneSyncManager.Mode == SessionMode.Hosting)
             {
-                // Show all IPs for easy sharing
                 var ips = SceneSyncManager.GetLocalIPAddresses();
                 foreach (var ip in ips)
                 {
@@ -492,7 +495,6 @@ namespace MultiplayerSceneEditor
                             sel > 0 ? $"{sel} obj{(sel != 1 ? "s" : "")} selected" : "idle");
             }
 
-            // Pending joins
             if (SceneSyncManager.PendingJoins.Count > 0)
             {
                 GUILayout.Space(6);
@@ -521,19 +523,27 @@ namespace MultiplayerSceneEditor
         private void DrawChatTab()
         {
             _chatScroll = EditorGUILayout.BeginScrollView(_chatScroll, GUILayout.ExpandHeight(true));
-            foreach (var (name, msg, _) in SceneSyncManager.ChatLog)
+            foreach (var (senderId, name, msg, time) in SceneSyncManager.ChatLog)
             {
+                // FIX: use senderId for colour lookup — names can clash, IDs can't
                 Color col = Color.gray;
-                foreach (var kv in SceneSyncManager.RemoteUsers)
-                    if (kv.Value.Info.displayName == name) { col = kv.Value.UserColor; break; }
-                if (SceneSyncManager.LocalUser?.displayName == name)
+                if (SceneSyncManager.LocalUser?.userId == senderId)
                     col = Color.HSVToRGB(SceneSyncManager.LocalUser.colorH, 0.85f, 0.95f);
+                else if (SceneSyncManager.RemoteUsers.TryGetValue(senderId, out var ru))
+                    col = ru.UserColor;
 
                 using (new EditorGUILayout.HorizontalScope())
                 {
+                    // HH:mm timestamp
+                    GUILayout.Label(time.ToString("HH:mm"),
+                        new GUIStyle(EditorStyles.miniLabel)
+                        { normal = { textColor = Color.gray }, wordWrap = false },
+                        GUILayout.Width(36));
+
                     GUILayout.Label(name + ":",
                         new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = col }, wordWrap = false },
-                        GUILayout.Width(90));
+                        GUILayout.Width(84));
+
                     GUILayout.Label(msg,
                         new GUIStyle(EditorStyles.wordWrappedLabel)
                         { normal = { textColor = new Color(0.85f, 0.85f, 0.85f) } });
@@ -546,7 +556,7 @@ namespace MultiplayerSceneEditor
             {
                 GUI.SetNextControlName("ChatInput");
                 _chatInput = EditorGUILayout.TextField(_chatInput);
-                bool send = GUILayout.Button("Send", GUILayout.Width(50));
+                bool send  = GUILayout.Button("Send", GUILayout.Width(50));
                 bool enter = Event.current.type == EventType.KeyDown
                           && Event.current.keyCode == KeyCode.Return
                           && GUI.GetNameOfFocusedControl() == "ChatInput";
@@ -564,9 +574,11 @@ namespace MultiplayerSceneEditor
 
         private void DrawLog()
         {
-            using (new EditorGUILayout.ScrollViewScope(Vector2.zero, GUILayout.Height(100)))
-                foreach (var line in _logLines)
-                    EditorGUILayout.LabelField(line, EditorStyles.miniLabel);
+            // FIX: use _logScroll instead of Vector2.zero so scroll position is remembered
+            _logScroll = EditorGUILayout.BeginScrollView(_logScroll, GUILayout.Height(100));
+            foreach (var line in _logLines)
+                EditorGUILayout.LabelField(line, EditorStyles.miniLabel);
+            EditorGUILayout.EndScrollView();
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

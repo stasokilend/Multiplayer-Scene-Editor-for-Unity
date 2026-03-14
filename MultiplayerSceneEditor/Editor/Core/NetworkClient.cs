@@ -13,8 +13,8 @@ namespace MultiplayerSceneEditor
     /// </summary>
     public class NetworkClient : IDisposable
     {
-        public ClientState State       { get; private set; } = ClientState.Idle;
-        public string      LocalUserId { get; private set; }
+        public ClientState State        { get; private set; } = ClientState.Idle;
+        public string      LocalUserId  { get; private set; }
         public string      DenialReason { get; private set; }
 
         public bool IsConnected => State == ClientState.Connected;
@@ -102,11 +102,11 @@ namespace MultiplayerSceneEditor
                     int offset = 0;
                     while (true)
                     {
-                        var env = Protocol.TryDecode(_stageBuf.Slice(offset), _stageLen - offset, out int consumed);
+                        // Zero-allocation decode: offset+length, no Slice()
+                        var env = Protocol.TryDecode(_stageBuf, offset, _stageLen - offset, out int consumed);
                         if (env == null) break;
                         offset += consumed;
 
-                        // Handle special states before queuing
                         var type = (MsgType)env.type;
 
                         if (type == MsgType.JoinPending)
@@ -134,7 +134,8 @@ namespace MultiplayerSceneEditor
                     if (offset > 0)
                     {
                         _stageLen -= offset;
-                        Buffer.BlockCopy(_stageBuf, offset, _stageBuf, 0, _stageLen);
+                        if (_stageLen > 0)
+                            Buffer.BlockCopy(_stageBuf, offset, _stageBuf, 0, _stageLen);
                     }
                 }
             }
