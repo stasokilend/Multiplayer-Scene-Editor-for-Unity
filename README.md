@@ -23,6 +23,13 @@ Multiplayer Scene Editor
 
 <br/>
 
+> [!WARNING]
+> **LAN only.** MSE communicates over a direct TCP connection — there is no relay server or cloud backend.  
+> All participants must be on the **same local network**.  
+> For remote teams, use a VPN such as [Tailscale](https://tailscale.com) or [ZeroTier](https://zerotier.com) to bridge networks before connecting.
+
+<br/>
+
 </div>
 
 ---
